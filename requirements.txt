@@ -1,0 +1,8 @@
+opencv-python==4.5.5.64
+gpytorch==1.6.0
+numpy==1.21.4
+PyYAML==6.0
+torch==1.11.0
+tqdm==4.62.3
+gym-minigrid==1.0.3
+torchvision==0.12.0
