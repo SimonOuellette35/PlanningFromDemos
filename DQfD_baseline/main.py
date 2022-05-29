@@ -6,10 +6,13 @@ import argparse
 import utils
 from DQfD import DQfDAgent
 
+W = 192
+H = 192
+
 def getDemoData():
     data_dir = './data/'
 
-    X, a, v = utils.loadMinigridDemonstrationsV2(data_dir)
+    X, a, v = utils.loadMinigridDemonstrationsV2(data_dir, W, H)
 
     training_X = X[:100]
     training_v = v[:100]
@@ -35,7 +38,7 @@ def main(use_PER):
         env = gym.make('CartPole-v1')
         
         # DQfDagent
-        dqfd_agent = DQfDAgent(env, use_PER, n_episode)
+        dqfd_agent = DQfDAgent(use_PER, n_episode)
         
         # DQfD agent train (pre-training only on demonstrations)
         train_X, train_a, train_v, test_X, test_a, test_v = getDemoData()

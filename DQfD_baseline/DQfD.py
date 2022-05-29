@@ -16,10 +16,11 @@ RUNNING_MINIBATCH_SIZE = 20
 
 class DQfDNetwork(nn.Module):
 
-    def __init__(self, in_size, out_size):
+    def __init__(self, encoder, in_size, out_size):
         super(DQfDNetwork, self).__init__()
         HIDDEN_SIZE = 256
 
+        self.encoder = encoder
         self.f1 = nn.Linear(in_size, HIDDEN_SIZE)
         self.f2 = nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
         self.f3 = nn.Linear(HIDDEN_SIZE, out_size)
@@ -32,7 +33,8 @@ class DQfDNetwork(nn.Module):
         self.loss = torch.nn.MSELoss()
 
     def forward(self,x):
-        x1 = F.relu(self.f1(x))
+        embedding = self.encoder(x)
+        x1 = F.relu(self.f1(embedding))
         x2 = F.relu(self.f2(x1))
         x3 = self.f3(x2)
         res = F.softmax(x3)
@@ -53,12 +55,12 @@ class DQfDAgent(object):
         # encoder
         resnet = models.resnet18(pretrained=True)
         modules = list(resnet.children())[:-1]
-        self.encoder = nn.Sequential(*modules)
-        self.encoder.double()
+        self.shared_encoder = nn.Sequential(*modules)
+        self.shared_encoder.double()
 
         # policy and target networks
-        self.policy_network = DQfDNetwork(self.state_size, self.action_size).to(self.device)
-        self.target_network = DQfDNetwork(self.state_size, self.action_size).to(self.device)
+        self.policy_network = DQfDNetwork(self.shared_encoder, self.state_size, self.action_size).to(self.device)
+        self.target_network = DQfDNetwork(self.shared_encoder, self.state_size, self.action_size).to(self.device)
 
         self.frequency = 1
         self.memory = Memory()
@@ -84,16 +86,10 @@ class DQfDAgent(object):
             next_frame = torch.from_numpy(next_frame).float().to(self.device)
             next_frame.requires_grad = True
 
-            # Get image embeddings
-
-            state = self.encoder(frame)
-            next_state = self.encoder(next_frame)
-
             # DQN loss
-
-            next_action = self.policy_network(next_state).argmax()
-            Q_target = self.target_network(next_state)[next_action]
-            Q_predict = self.policy_network(state)[action]
+            next_action = self.policy_network(next_frame).argmax()
+            Q_target = self.target_network(next_frame)[next_action]
+            Q_predict = self.policy_network(frame)[action]
 
             double_dqn_loss = reward + self.gamma * Q_target - Q_predict
             double_dqn_loss = torch.pow(double_dqn_loss, 2)
@@ -107,7 +103,7 @@ class DQfDAgent(object):
 
             partial_margin_classification_loss = torch.Tensor([0]).to(self.device)
             for selected_action in range(self.action_size):
-                expect = self.target_network(state)[selected_action]
+                expect = self.target_network(frame)[selected_action]
                 partial_margin_classification_loss = max(partial_margin_classification_loss,
                                                          expect + margin(action, selected_action))
             margin_classification_loss = partial_margin_classification_loss - Q_predict
@@ -115,7 +111,7 @@ class DQfDAgent(object):
             # n-step returns #
 
             n_step_returns = torch.Tensor([reward]).to(self.device)
-            current_n_step_next_state = next_state.detach().cpu().numpy()
+            current_n_step_next_state = next_frame.detach().cpu().numpy()
             n = min(self.n - episode, 10)
             for exp in range(1, n):
                 _, _, current_n_step_reward, current_n_step_next_state, __done__, _ = minibatch[episode + exp]
@@ -189,6 +185,8 @@ class Memory():
         self.alpha = 2
         self.beta = 0
 
+    # TODO: expected 4D input, got 3D at line self.td_errors[self.idx] = ...
+    #  expects batches of images?
     def push(self, obj, agent: DQfDAgent):
         if self.idx == self.length:
             self.idx = 0
