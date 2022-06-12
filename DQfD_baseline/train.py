@@ -24,66 +24,64 @@ def optimize_dqfd(bsz, data):
     # Shape of v: [num episodes, num steps per episode]
     X, a, v = data
 
-    state_batch = []
-    action_batch = []
-    reward_batch = []
-    next_state_batch = []
+    train_state_batch = []
+    train_action_batch = []
 
-    # TODO: training vs validation set
+    test_state_batch = []
+    test_action_batch = []
 
-    # re-structure X, a, v to fit the rest of the code, randomly sample batches of transitions
+    train_episodes = int(len(X) * 0.8)
+
+    # randomly sample batches of training transitions
     for i in range(bsz):
-        episode_idx = np.random.choice(np.arange(len(X)))
+        episode_idx = np.random.choice(np.arange(train_episodes))
         step_idx = np.random.choice(np.arange(len(X[episode_idx])-1))
 
         state = X[episode_idx][step_idx][0]
-        state_batch.append(state)
-        action_batch.append(a[episode_idx][step_idx+1])     # We care about the action taken after seeing this state
-        reward_batch.append(float(v[episode_idx][step_idx]))
-        if step_idx < (len(X[episode_idx]) - 1):
-            next_state = X[episode_idx][step_idx+1][0]
-            next_state_batch.append(next_state)
-        else:
-            next_state_batch.append(state)
+        train_state_batch.append(state)
+        train_action_batch.append(a[episode_idx][step_idx+1])     # We care about the action taken after seeing this state
 
-    state_batch = torch.from_numpy(np.array(state_batch)).to(device)
-    action_batch = torch.from_numpy(np.array(action_batch)).to(device)
-    reward_batch = torch.reshape(torch.from_numpy(np.ones(action_batch.shape)).to(device), [action_batch.shape[0], 1])
-    next_state_batch = torch.from_numpy(np.array(next_state_batch)).to(device)
+    # randomly sample batches of test transitions
+    for i in range(200):
+        episode_idx = np.random.choice(np.arange((len(X) - train_episodes)))
+        step_idx = np.random.choice(np.arange(len(X[train_episodes + episode_idx])-1))
+
+        state = X[train_episodes + episode_idx][step_idx][0]
+        test_state_batch.append(state)
+        test_action_batch.append(a[train_episodes + episode_idx][step_idx+1])     # We care about the action taken after seeing this state
+
+    train_state_batch = torch.from_numpy(np.array(train_state_batch)).to(device)
+    train_action_batch = torch.from_numpy(np.array(train_action_batch)).to(device)
+    test_state_batch = torch.from_numpy(np.array(test_state_batch)).to(device)
+    test_action_batch = torch.from_numpy(np.array(test_action_batch)).to(device)
+
+    # Each expert-demonstrated action gives a reward of 1. (the supervised loss takes care of telling the DQN that
+    #  the other actions weren't as good)
+    reward_batch = torch.reshape(torch.from_numpy(np.ones(train_action_batch.shape)).to(device), [train_action_batch.shape[0], 1])
 
     # TODO: does the n-step return approach make sense for the way we attribute rewards to demo data?
     #n_reward_batch = Variable(torch.cat(batch.n_reward))
 
-    q_vals = model(state_batch)
-    # print("qvals = ", q_vals)
-    # print("action_batch = ", action_batch)
+    q_vals = model(train_state_batch)
 
-    state_action_values = q_vals.gather(1, action_batch)
-    #print("state_action_values = ", state_action_values)
+    state_action_values = q_vals.gather(1, train_action_batch)
 
     # comparing the q values to the values expected using the next states and reward
     #next_q_vals = model(next_state_batch)
-    #print("next_q_vals = ", next_q_vals)
     #next_state_values = next_q_vals.data.max(-1).values
-    #print("next_state_values = ", next_state_values)
-    #print("reward_batch shape = ", reward_batch.shape)
     #expected_state_action_values = next_state_values.unsqueeze(-1) + reward_batch
 
     # calculating the q loss and n-step return loss
-    #print("state_action_values shape = ", state_action_values.shape)
-    #print("expected_state_action_values shape = ", expected_state_action_values.shape)
     #q_loss = F.mse_loss(state_action_values, expected_state_action_values, reduction='sum')
-    #print("reward_batch = ", reward_batch)
     reward_batch = torch.reshape(reward_batch.unsqueeze(-1), [reward_batch.shape[0], 1])
 
-    #print("state_actions_values shape = %s, reward_batch shape = %s" % (state_action_values.shape, reward_batch.shape))
     q_loss = F.mse_loss(state_action_values, reward_batch, reduction='sum')
     #n_step_loss = F.mse_loss(state_action_values, n_reward_batch, size_average=False)
 
     # calculating the supervised loss
     num_actions = q_vals.size(1)
     margins = (torch.ones(num_actions, num_actions) - torch.eye(num_actions)) * MARGIN
-    batch_margins = margins[action_batch.data.squeeze().cpu()]
+    batch_margins = margins[train_action_batch.data.squeeze().cpu()]
 
     q_vals = q_vals + Variable(batch_margins).type(dtype)
 
@@ -99,7 +97,19 @@ def optimize_dqfd(bsz, data):
     torch.nn.utils.clip_grad_norm_(model.parameters(), 100)
     optimizer.step()
 
-    return loss.cpu().data.numpy(), q_loss.cpu().data.numpy(), supervised_loss.cpu().data.numpy()
+    # calculate test accuracy
+    with torch.no_grad():
+        test_q_vals = model(test_state_batch)
+        test_actions = np.argmax(test_q_vals.cpu().data.numpy(), axis=-1)
+
+        accuracy = 0.
+        for i in range(test_actions.shape[0]):
+            if test_actions[i] == test_action_batch[i]:
+                accuracy += 1.
+
+        accuracy /= float(test_actions.shape[0])
+
+    return loss.cpu().data.numpy(), q_loss.cpu().data.numpy(), supervised_loss.cpu().data.numpy(), accuracy
 
 parser = argparse.ArgumentParser(description='Minigrid DQfD')
 
@@ -163,7 +173,7 @@ NC = 3
 # H = 228
 W = 192
 H = 192
-NUM_ITERATIONS = 400
+NUM_ITERATIONS = 100
 MARGIN = 0.8
 BATCH_SIZE = 64
 LR = 0.0005
@@ -201,15 +211,20 @@ if __name__ == '__main__':
     print('Pre-training')
 
     losses = []
+    best_loss = 10000.
+    best_accuracy = 0.
     for i in range(NUM_ITERATIONS):
-        loss, q_loss, sup_loss = optimize_dqfd(BATCH_SIZE, (X, a, v))
+        loss, q_loss, sup_loss, accuracy = optimize_dqfd(BATCH_SIZE, (X, a, v))
 
-        # saving the model every 100 episodes
-        if i % 100 == 0:
+        print("Iteration #%i: loss = %.4f (Q loss = %.4f, supervised loss = %.4f), test accuracy : %.2f" % (i, loss, q_loss, sup_loss, accuracy))
+        if accuracy >= best_accuracy and loss < best_loss:
+            print("--> saving best new model.")
             pickle.dump(model.state_dict(), open("model" + '.p', 'wb'))
+            best_accuracy = accuracy
+            best_loss = loss
 
         losses.append(loss)
-        print("Iteration #%i: loss = %.4f (Q loss = %.4f, supervised loss = %.4f)" % (i, loss, q_loss, sup_loss))
+
 
     print('Pre-training done')
     plt.plot(losses)
@@ -220,7 +235,7 @@ if __name__ == '__main__':
     for i in range(NUM_TESTS):
         state_batch = torch.from_numpy(np.array(test_X[i])).to(device)
         action_logits = model(state_batch)
-        selected_action = np.argmax(action_logits.cpu().data.numpy())
+        selected_action = np.argmax(action_logits.cpu().data.numpy(), axis=-1)
 
         print("Selection action: %s, action logits: %s, ground truth: %s" % (
             selected_action, action_logits.cpu().data.numpy()[0], test_a[i][0]

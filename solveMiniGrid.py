@@ -9,6 +9,11 @@ from DQfD_baseline.models import DQN
 from SupervisedPolicy_baseline.models import PolicyClassifier
 import pickle
 
+#MODEL_NAME = 'DQFD'
+
+# 'BC' : behavioural cloning model
+# 'DQFD' : Deep Q-learning from demonsrations
+# anything else: our proposed solution
 MODEL_NAME = 'DQFD'
 
 device = 'cuda'
@@ -20,12 +25,9 @@ H = 192
 #W = 228
 #H = 228
 TILE_SIZE = 32
-TEST_EPISODE = 1
-NUM_EPISODES = 100
-SKIP_LEVELS = 1
-
-# TODO: am I using the modded minigrid without the area highlighting? Is the triangle color the same as in the
-# demos? TILE SIZE the same? Compare the demo images with the images received and fed to the model.
+TEST_EPISODE = 111
+NUM_EPISODES = 200
+SKIP_LEVELS = 111
 
 model_path = './DQfD_baseline/model.p'
 data_dir = 'data/'

@@ -41,8 +41,7 @@ class PolicyClassifier(nn.Module):
     def _forward_conv(self, x):
         if USE_RESNET:
             tmp = self.encoder(x)
-            tmp = F.relu(tmp)
-            return self.encoder_lin(tmp)
+            return torch.reshape(tmp, [x.shape[0], 512])
         else:
             x = F.relu(F.max_pool2d(self.conv1(x), 3, 2))
             x = F.relu(F.max_pool2d(self.conv2(x), 3, 2))
@@ -52,7 +51,6 @@ class PolicyClassifier(nn.Module):
     def forward(self, states):
         x = self._forward_conv(states)
 
-        print("x.shape = ", x.shape)
         if not USE_RESNET:
             x = x.view(states.size(0), -1)
 

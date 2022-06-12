@@ -16,9 +16,7 @@ class DQN(nn.Module):
             resnet = models.resnet18(pretrained=True)
             modules = list(resnet.children())[:-1]
             self.encoder = nn.Sequential(*modules)
-
-            self.encoder_lin = nn.Linear(512, 256)
-            self.lin1 = nn.Linear(256, 256)
+            self.lin1 = nn.Linear(512, 256)
         else:
             self.conv1 = nn.Conv2d(input_shape[0], 32, 5, padding=1)
             self.conv2 = nn.Conv2d(32, 32, 3, padding=1)
@@ -42,10 +40,7 @@ class DQN(nn.Module):
     def _forward_conv(self, x):
         if USE_RESNET:
             tmp = self.encoder(x)
-            tmp = tmp.view(tmp.size(0), -1)
-
-            tmp = F.relu(tmp)
-            return self.encoder_lin(tmp)
+            return torch.reshape(tmp, [x.shape[0], 512])
         else:
             x = F.relu(F.max_pool2d(self.conv1(x), 3, 2))
             x = F.relu(F.max_pool2d(self.conv2(x), 3, 2))

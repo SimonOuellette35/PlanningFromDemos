@@ -26,36 +26,40 @@ def optimize(bsz, data):
     # Shape of v: [num episodes, num steps per episode]
     X, a, v = data
 
-    state_batch = []
-    action_batch = []
-    reward_batch = []
-    next_state_batch = []
+    train_state_batch = []
+    train_action_batch = []
 
-    # TODO: training vs validation set
+    test_state_batch = []
+    test_action_batch = []
 
-    # re-structure X, a, v to fit the rest of the code, randomly sample batches of transitions
+    train_episodes = int(len(X) * 0.8)
+
+    # randomly sample batches of training transitions
     for i in range(bsz):
-        episode_idx = np.random.choice(np.arange(len(X)))
+        episode_idx = np.random.choice(np.arange(train_episodes))
         step_idx = np.random.choice(np.arange(len(X[episode_idx])-1))
 
         state = X[episode_idx][step_idx][0]
-        state_batch.append(state)
-        action_batch.append(a[episode_idx][step_idx+1])     # We care about the action taken after seeing this state
-        reward_batch.append(float(v[episode_idx][step_idx]))
-        if step_idx < (len(X[episode_idx]) - 1):
-            next_state = X[episode_idx][step_idx+1][0]
-            next_state_batch.append(next_state)
-        else:
-            next_state_batch.append(state)
+        train_state_batch.append(state)
+        train_action_batch.append(a[episode_idx][step_idx+1])     # We care about the action taken after seeing this state
 
-    state_batch = torch.from_numpy(np.array(state_batch)).to(device)
-    action_batch = torch.from_numpy(np.array(action_batch)).to(device)
+    # randomly sample batches of test transitions
+    for i in range(200):
+        episode_idx = np.random.choice(np.arange((len(X) - train_episodes)))
+        step_idx = np.random.choice(np.arange(len(X[train_episodes + episode_idx])-1))
 
-    outputs = model(state_batch)
-    # print("outputs shape = ", outputs.shape)
-    # print("action_batch shape = ", action_batch.shape)
-    action_batch = torch.reshape(action_batch, [-1])
-    loss = loss_fn(outputs, action_batch)
+        state = X[train_episodes + episode_idx][step_idx][0]
+        test_state_batch.append(state)
+        test_action_batch.append(a[train_episodes + episode_idx][step_idx+1])     # We care about the action taken after seeing this state
+
+    train_state_batch = torch.from_numpy(np.array(train_state_batch)).to(device)
+    train_action_batch = torch.from_numpy(np.array(train_action_batch)).to(device)
+    test_state_batch = torch.from_numpy(np.array(test_state_batch)).to(device)
+    test_action_batch = torch.from_numpy(np.array(test_action_batch)).to(device)
+
+    outputs = model(train_state_batch)
+    train_action_batch = torch.reshape(train_action_batch, [-1])
+    loss = loss_fn(outputs, train_action_batch)
 
     # optimization step and logging
     optimizer.zero_grad()
@@ -63,7 +67,19 @@ def optimize(bsz, data):
     torch.nn.utils.clip_grad_norm_(model.parameters(), 100)
     optimizer.step()
 
-    return loss.cpu().data.numpy()
+    # calculate test accuracy
+    with torch.no_grad():
+        test_q_vals = model(test_state_batch)
+        test_actions = np.argmax(test_q_vals.cpu().data.numpy(), axis=-1)
+
+        accuracy = 0.
+        for i in range(test_actions.shape[0]):
+            if test_actions[i] == test_action_batch[i]:
+                accuracy += 1.
+
+        accuracy /= float(test_actions.shape[0])
+
+    return loss.cpu().data.numpy(), accuracy
 
 parser = argparse.ArgumentParser(description='Minigrid DQfD')
 
@@ -127,9 +143,9 @@ NC = 3
 # H = 228
 W = 192
 H = 192
-NUM_ITERATIONS = 400
+NUM_ITERATIONS = 250
 BATCH_SIZE = 64
-LR = 0.0001
+LR = 0.001
 
 NUM_TESTS = 500
 
@@ -164,15 +180,20 @@ if __name__ == '__main__':
     print('Pre-training')
 
     losses = []
+    best_loss = 10000.
+    best_accuracy = 0.
     for i in range(NUM_ITERATIONS):
-        loss = optimize(BATCH_SIZE, (X, a, v))
+        loss, accuracy = optimize(BATCH_SIZE, (X, a, v))
 
-        # saving the model every 100 episodes
-        if i % 100 == 0:
+        print("Iteration #%i: loss = %.4f, test accuracy : %.2f" % (i, loss, accuracy))
+        if accuracy >= best_accuracy and loss < best_loss:
+            print("--> saving best new model.")
             pickle.dump(model.state_dict(), open("model" + '.p', 'wb'))
+            best_accuracy = accuracy
+            best_loss = loss
 
         losses.append(loss)
-        print("Iteration #%i: loss = %.4f" % (i, loss))
+
 
     print('Pre-training done')
     plt.plot(losses)
