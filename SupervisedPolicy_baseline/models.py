@@ -6,9 +6,9 @@ import torchvision.models as models
 
 USE_RESNET = False
 
-class DQN(nn.Module):
+class PolicyClassifier(nn.Module):
     def __init__(self, dtype, input_shape, num_actions):
-        super(DQN, self).__init__()
+        super(PolicyClassifier, self).__init__()
         self.dtype = dtype
 
         # encoder
@@ -17,8 +17,7 @@ class DQN(nn.Module):
             modules = list(resnet.children())[:-1]
             self.encoder = nn.Sequential(*modules)
 
-            self.encoder_lin = nn.Linear(512, 256)
-            self.lin1 = nn.Linear(256, 256)
+            self.lin1 = nn.Linear(512, 256)
         else:
             self.conv1 = nn.Conv2d(input_shape[0], 32, 5, padding=1)
             self.conv2 = nn.Conv2d(32, 32, 3, padding=1)
@@ -42,8 +41,6 @@ class DQN(nn.Module):
     def _forward_conv(self, x):
         if USE_RESNET:
             tmp = self.encoder(x)
-            tmp = tmp.view(tmp.size(0), -1)
-
             tmp = F.relu(tmp)
             return self.encoder_lin(tmp)
         else:
@@ -55,6 +52,7 @@ class DQN(nn.Module):
     def forward(self, states):
         x = self._forward_conv(states)
 
+        print("x.shape = ", x.shape)
         if not USE_RESNET:
             x = x.view(states.size(0), -1)
 

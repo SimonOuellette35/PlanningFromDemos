@@ -98,4 +98,10 @@ def loadMinigridDemonstrationsV2(data_dir, width=192, height=192):
 
         v.append(np.reshape(value_sequence, [-1, 1]))
 
+    total_interactions = 0
+    for a_episode in a:
+        total_interactions += len(a_episode)
+
+    print("Loaded a total of %i interactions." % total_interactions)
+
     return X, a, v

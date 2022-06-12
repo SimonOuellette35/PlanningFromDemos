@@ -10,14 +10,16 @@ from torch.autograd import Variable
 import matplotlib.pyplot as plt
 
 from utils import loadMinigridDemonstrationsV2
-from models import DQN
+from models import PolicyClassifier
 
 # GPU support
 USE_CUDA = torch.cuda.is_available()
 dtype = torch.cuda.DoubleTensor if USE_CUDA else torch.DoubleTensor
+
+loss_fn = torch.nn.CrossEntropyLoss()
 device = 'cuda'
 
-def optimize_dqfd(bsz, data):
+def optimize(bsz, data):
 
     # Shape of X: [num episodes, num steps per episode, NC, W, H]
     # Shape of a: [num episodes, num steps per episode]
@@ -48,50 +50,12 @@ def optimize_dqfd(bsz, data):
 
     state_batch = torch.from_numpy(np.array(state_batch)).to(device)
     action_batch = torch.from_numpy(np.array(action_batch)).to(device)
-    reward_batch = torch.reshape(torch.from_numpy(np.ones(action_batch.shape)).to(device), [action_batch.shape[0], 1])
-    next_state_batch = torch.from_numpy(np.array(next_state_batch)).to(device)
 
-    # TODO: does the n-step return approach make sense for the way we attribute rewards to demo data?
-    #n_reward_batch = Variable(torch.cat(batch.n_reward))
-
-    q_vals = model(state_batch)
-    # print("qvals = ", q_vals)
-    # print("action_batch = ", action_batch)
-
-    state_action_values = q_vals.gather(1, action_batch)
-    #print("state_action_values = ", state_action_values)
-
-    # comparing the q values to the values expected using the next states and reward
-    #next_q_vals = model(next_state_batch)
-    #print("next_q_vals = ", next_q_vals)
-    #next_state_values = next_q_vals.data.max(-1).values
-    #print("next_state_values = ", next_state_values)
-    #print("reward_batch shape = ", reward_batch.shape)
-    #expected_state_action_values = next_state_values.unsqueeze(-1) + reward_batch
-
-    # calculating the q loss and n-step return loss
-    #print("state_action_values shape = ", state_action_values.shape)
-    #print("expected_state_action_values shape = ", expected_state_action_values.shape)
-    #q_loss = F.mse_loss(state_action_values, expected_state_action_values, reduction='sum')
-    #print("reward_batch = ", reward_batch)
-    reward_batch = torch.reshape(reward_batch.unsqueeze(-1), [reward_batch.shape[0], 1])
-
-    #print("state_actions_values shape = %s, reward_batch shape = %s" % (state_action_values.shape, reward_batch.shape))
-    q_loss = F.mse_loss(state_action_values, reward_batch, reduction='sum')
-    #n_step_loss = F.mse_loss(state_action_values, n_reward_batch, size_average=False)
-
-    # calculating the supervised loss
-    num_actions = q_vals.size(1)
-    margins = (torch.ones(num_actions, num_actions) - torch.eye(num_actions)) * MARGIN
-    batch_margins = margins[action_batch.data.squeeze().cpu()]
-
-    q_vals = q_vals + Variable(batch_margins).type(dtype)
-
-    max_qvals = q_vals.max(1)[0].unsqueeze(1)
-
-    supervised_loss = (max_qvals - state_action_values).pow(2).sum()
-
-    loss = q_loss + LAMBDA * supervised_loss #+ args.lam_nstep * n_step_loss
+    outputs = model(state_batch)
+    # print("outputs shape = ", outputs.shape)
+    # print("action_batch shape = ", action_batch.shape)
+    action_batch = torch.reshape(action_batch, [-1])
+    loss = loss_fn(outputs, action_batch)
 
     # optimization step and logging
     optimizer.zero_grad()
@@ -99,7 +63,7 @@ def optimize_dqfd(bsz, data):
     torch.nn.utils.clip_grad_norm_(model.parameters(), 100)
     optimizer.step()
 
-    return loss.cpu().data.numpy(), q_loss.cpu().data.numpy(), supervised_loss.cpu().data.numpy()
+    return loss.cpu().data.numpy()
 
 parser = argparse.ArgumentParser(description='Minigrid DQfD')
 
@@ -164,10 +128,9 @@ NC = 3
 W = 192
 H = 192
 NUM_ITERATIONS = 400
-MARGIN = 0.8
 BATCH_SIZE = 64
-LR = 0.0005
-LAMBDA = 1.0
+LR = 0.0001
+
 NUM_TESTS = 500
 
 if __name__ == '__main__':
@@ -193,7 +156,7 @@ if __name__ == '__main__':
         test_a.append(a[episode_idx][step_idx+1])
 
     # instantiating model and optimizer
-    model = DQN(dtype, (NC, W, H), ACTION_SPACE)
+    model = PolicyClassifier(dtype, (NC, W, H), ACTION_SPACE)
 
     optimizer = optim.Adam(model.parameters(), lr=LR)
 
@@ -202,14 +165,14 @@ if __name__ == '__main__':
 
     losses = []
     for i in range(NUM_ITERATIONS):
-        loss, q_loss, sup_loss = optimize_dqfd(BATCH_SIZE, (X, a, v))
+        loss = optimize(BATCH_SIZE, (X, a, v))
 
         # saving the model every 100 episodes
         if i % 100 == 0:
             pickle.dump(model.state_dict(), open("model" + '.p', 'wb'))
 
         losses.append(loss)
-        print("Iteration #%i: loss = %.4f (Q loss = %.4f, supervised loss = %.4f)" % (i, loss, q_loss, sup_loss))
+        print("Iteration #%i: loss = %.4f" % (i, loss))
 
     print('Pre-training done')
     plt.plot(losses)
