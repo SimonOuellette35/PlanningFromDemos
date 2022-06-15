@@ -15,7 +15,7 @@ from models import PolicyClassifier
 # GPU support
 USE_CUDA = torch.cuda.is_available()
 dtype = torch.cuda.DoubleTensor if USE_CUDA else torch.DoubleTensor
-
+np.set_printoptions(suppress=True)
 loss_fn = torch.nn.CrossEntropyLoss()
 device = 'cuda'
 
@@ -59,12 +59,15 @@ def optimize(bsz, data):
 
     outputs = model(train_state_batch)
     train_action_batch = torch.reshape(train_action_batch, [-1])
+    # print("outputs = %s, train_action_batch = %s" % (
+    #     outputs.cpu().data.numpy(), train_action_batch.cpu().data.numpy())
+    # )
     loss = loss_fn(outputs, train_action_batch)
 
     # optimization step and logging
     optimizer.zero_grad()
     loss.backward()
-    torch.nn.utils.clip_grad_norm_(model.parameters(), 100)
+    #torch.nn.utils.clip_grad_norm_(model.parameters(), 100)
     optimizer.step()
 
     # calculate test accuracy
@@ -139,11 +142,11 @@ parser.add_argument('--upload', action="store_true",
 
 ACTION_SPACE = 3
 NC = 3
-# W = 228
-# H = 228
+#W = 228
+#H = 228
 W = 192
 H = 192
-NUM_ITERATIONS = 250
+NUM_ITERATIONS = 200
 BATCH_SIZE = 64
 LR = 0.001
 

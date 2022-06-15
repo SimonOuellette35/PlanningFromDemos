@@ -12,31 +12,38 @@ import pickle
 #MODEL_NAME = 'DQFD'
 
 # 'BC' : behavioural cloning model
-# 'DQFD' : Deep Q-learning from demonsrations
+# 'DQFD' : Deep Q-learning from demonstrations
 # anything else: our proposed solution
-MODEL_NAME = 'DQFD'
+MODEL_NAME = 'BC'
+GRID_DIFFICULTY = 'Intermediate'
+
+if GRID_DIFFICULTY == 'Easy':
+    W = 192
+    H = 192
+    TILE_SIZE = 32
+
+elif GRID_DIFFICULTY == 'Intermediate':
+    W = 228
+    H = 228
+    TILE_SIZE = 12
 
 device = 'cuda'
 ACTION_SPACE = 3
-Z_DIM=512
+Z_DIM = 512
 NC = 3
-W = 192
-H = 192
-#W = 228
-#H = 228
-TILE_SIZE = 32
-TEST_EPISODE = 111
-NUM_EPISODES = 200
-SKIP_LEVELS = 111
 
-model_path = './DQfD_baseline/model.p'
+TEST_EPISODE = 101
+NUM_EPISODES = 200
+SKIP_LEVELS = 101
+
+model_path = './SupervisedPolicy_baseline/model.p'
 data_dir = 'data/'
 
 print("Initializing environment...")
 
 #env = gym.make('MiniGrid-MultiRoom-N6-v0')
-env = gym.make('MiniGrid-Empty-Random-6x6-v0')
-#env = gym.make('MiniGrid-FourRooms-v0')
+#env = gym.make('MiniGrid-Empty-Random-6x6-v0')
+env = gym.make('MiniGrid-FourRooms-v0')
 env = RGBImgObsWrapper(env)  # Get pixel observations
 env = ImgObsWrapper(env)            # Get rid of the 'mission' field
 

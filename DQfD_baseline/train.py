@@ -169,10 +169,10 @@ parser.add_argument('--upload', action="store_true",
 
 ACTION_SPACE = 3
 NC = 3
-# W = 228
-# H = 228
-W = 192
-H = 192
+W = 228
+H = 228
+# W = 192
+# H = 192
 NUM_ITERATIONS = 100
 MARGIN = 0.8
 BATCH_SIZE = 64
@@ -232,16 +232,17 @@ if __name__ == '__main__':
 
     print('Starting in-sample evaluation of learning.')
     accuracy = 0.
+    # TODO: idea: try rotational and mirror flip data augmentation
     for i in range(NUM_TESTS):
         state_batch = torch.from_numpy(np.array(test_X[i])).to(device)
         action_logits = model(state_batch)
         selected_action = np.argmax(action_logits.cpu().data.numpy(), axis=-1)
 
         print("Selection action: %s, action logits: %s, ground truth: %s" % (
-            selected_action, action_logits.cpu().data.numpy()[0], test_a[i][0]
+            selected_action[0], action_logits.cpu().data.numpy()[0], test_a[i][0]
         ))
 
-        if selected_action == test_a[i][0]:
+        if selected_action[0] == test_a[i][0]:
             accuracy += 1.
 
         # plt.imshow(np.reshape(test_X[i], [W, H, NC]))

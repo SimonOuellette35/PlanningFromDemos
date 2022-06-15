@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import pickle
 import model.dnd as dnd
 
-data_dir = './data/4rooms/'
+data_dir = './SupervisedPolicy_baseline/data/'
 model_dir = './saved_models/'
 DEVICE = 'cuda'
 ACTION_SPACE = 4
