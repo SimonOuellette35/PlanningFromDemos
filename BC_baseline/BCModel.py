@@ -2,13 +2,12 @@ import torch.nn.functional as F
 import torch.nn as nn
 import numpy as np
 import torch
-from model.dnd import DND
 import torchvision.models as models
 
 
-class PolicyModel(nn.Module):
+class BCModel(nn.Module):
 
-    def __init__(self, z_dim=512, action_space=3, stop_threshold=0., dict_len=1000, device='cuda'):
+    def __init__(self, z_dim=512, action_space=3, stop_threshold=0., device='cuda'):
         super().__init__()
 
         self.device = device
@@ -42,10 +41,25 @@ class PolicyModel(nn.Module):
     def trainSequence(self, train_images, train_actions, train_values, eval=False):
         embeddings = torch.reshape(self.encoder(train_images[:-1]), [train_images.shape[0]-1, self.z_dim]).to(self.device)
 
-        # Pred_actions = [N, 3], actual_actions = [N, 1]
-        pred_actions = self.policyPredictor(embeddings)
+        # Pred_logits = [N, 3], actual_actions = [N, 1]
+        pred_logits = F.softmax(self.policyPredictor(embeddings), dim=-1)
 
         act = np.reshape(train_actions[1:], [-1])
         actual_actions = torch.from_numpy(act).to(self.device)
 
-        return self.calculate_loss(pred_actions, actual_actions)
+        pred_actions = np.argmax(pred_logits.cpu().data.numpy(), axis=-1)
+
+        accuracy = 0.
+        for i in range(pred_actions.shape[0]):
+            if pred_actions[i] == act[i]:
+                accuracy += 1
+
+        accuracy /= float(pred_actions.shape[0])
+
+        return self.calculate_loss(pred_logits, actual_actions), accuracy
+
+    def forward(self, X):
+        embeddings = torch.reshape(self.encoder(X), [X.shape[0], self.z_dim])
+        pred_actions = F.softmax(self.policyPredictor(embeddings), dim=-1)
+
+        return pred_actions

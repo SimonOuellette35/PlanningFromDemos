@@ -80,17 +80,17 @@ def loadMinigridDemonstrationsV2(data_dir, width=192, height=192):
                 # plt.show()
 
                 # Convert the image to PyTorch tensor
-                np_image = np.reshape(image, [1, NC, HEIGHT, WIDTH])
-                image_sequence.append(torch.from_numpy(np_image/255.))
+                np_image = np.reshape(image, [NC, HEIGHT, WIDTH]) / 255.
+                image_sequence.append(np_image)
             else:
                 cap.release()
 
         cap.release()
         cv2.destroyAllWindows()
 
-        img_sequence_tensor = torch.cat(image_sequence, axis=0)
+        #img_sequence_tensor = torch.cat(image_sequence, axis=0)
 
-        X.append(img_sequence_tensor)
+        X.append(image_sequence)
 
         value_sequence = []
         for i in range(frame_count):

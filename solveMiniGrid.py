@@ -1,20 +1,22 @@
 from gym_minigrid.wrappers import *
 import torch
 import utils
-from model.MotionPlannerV2 import MotionPlanner
+from Ablation_baseline.AblationStudy import AblationModel
+from model.ConvictionPlanner import ConvictionPlanner
+from model.MCTS import MCTS
 import cv2
 import numpy as np
 from gym_minigrid.window import Window
 from DQfD_baseline.models import DQN
-from SupervisedPolicy_baseline.models import PolicyClassifier
+from BC_baseline.BCModelV2 import BCModel
 import pickle
-
-#MODEL_NAME = 'DQFD'
+import collections
 
 # 'BC' : behavioural cloning model
 # 'DQFD' : Deep Q-learning from demonstrations
-# anything else: our proposed solution
-MODEL_NAME = 'BC'
+# 'Ablation': 1-step ahead only solution (ablation study: doesn't plan 5 steps ahead)
+# 'Conviction': our proposed solution
+MODEL_NAME = 'Conviction'
 GRID_DIFFICULTY = 'Intermediate'
 
 if GRID_DIFFICULTY == 'Easy':
@@ -31,19 +33,27 @@ device = 'cuda'
 ACTION_SPACE = 3
 Z_DIM = 512
 NC = 3
+DET_SEED = 555
 
-TEST_EPISODE = 101
-NUM_EPISODES = 200
-SKIP_LEVELS = 101
+np.random.seed(DET_SEED)
 
-model_path = './SupervisedPolicy_baseline/model.p'
-data_dir = 'data/'
+TEST_EPISODE = 701
+NUM_EPISODES = 800
+SKIP_LEVELS = 700
+LOAD_DND = True
+
+model_path = './saved_models/best_full_modelV3'
+data_dir = 'BC_baseline/data/'
 
 print("Initializing environment...")
 
-#env = gym.make('MiniGrid-MultiRoom-N6-v0')
-#env = gym.make('MiniGrid-Empty-Random-6x6-v0')
-env = gym.make('MiniGrid-FourRooms-v0')
+if GRID_DIFFICULTY == 'Easy':
+    env = gym.make('MiniGrid-Empty-Random-6x6-v0')
+elif GRID_DIFFICULTY == 'Intermediate':
+    env = gym.make('MiniGrid-FourRooms-v0')
+# elif GRID_DIFFICULTY == 'Hard':
+#     env = gym.make('MiniGrid-MultiRoom-N6-v0')
+
 env = RGBImgObsWrapper(env)  # Get pixel observations
 env = ImgObsWrapper(env)            # Get rid of the 'mission' field
 
@@ -56,22 +66,27 @@ print("Loading pre-trained model...")
 
 #  load model
 if MODEL_NAME=='DQFD':
-    # Using a pre-trained "Deep Q-Learning from Demonstrations" model
+    print("============= Using Deep Q-Learning from Demonstrations baseline model ===================")
     dtype = torch.cuda.DoubleTensor if device == 'cuda' else torch.DoubleTensor
     model = DQN(dtype, (NC, W, H), ACTION_SPACE)
 
     model.load_state_dict(pickle.load(open(model_path, 'rb')))
 elif MODEL_NAME=='BC':
+    print("============= Using Behavioral cloning baseline model ===================")
     # Using a pre-trained Behavioral cloning model
-    dtype = torch.cuda.DoubleTensor if device == 'cuda' else torch.DoubleTensor
-    model = PolicyClassifier(dtype, (NC, W, H), ACTION_SPACE)
+    model = BCModel(action_space=2, device=device)
 
-    model.load_state_dict(pickle.load(open(model_path, 'rb')))
-else:
-    # TODO: give my class a more generic/relevant name
-    model = MotionPlanner(action_space=ACTION_SPACE, device=device, dict_len=25000)
+    model.load_state_dict(torch.load(model_path))
+elif MODEL_NAME=='Ablation':
+    print("============= Using ablation study (1-step ahead motion planner) ===================")
+    model = AblationModel(action_space=ACTION_SPACE, device=device, dict_len=25000)
 
     # Load neural network module
+    model.load_state_dict(torch.load(model_path))
+elif MODEL_NAME=='Conviction':
+    print("============= Using Conviction planner ===================")
+    model = ConvictionPlanner(action_space=ACTION_SPACE, device=device, dict_len=25000)
+
     model.load_state_dict(torch.load(model_path))
 
 model.to(device)
@@ -98,8 +113,12 @@ if MODEL_NAME != 'DQFD' and MODEL_NAME != 'BC':
       test_v.append(np.array(v[T+i]))
 
     step_counter = 0
-    for tmp_a in training_a:
-        step_counter += len(tmp_a)
+    flat_a = []
+    for tmp_seq_a in training_a:
+        for tmp_a in tmp_seq_a:
+            flat_a.append(tmp_a[0])
+
+        step_counter += len(tmp_seq_a)
 
     print("step_counter = ", step_counter)
 
@@ -108,23 +127,84 @@ if MODEL_NAME != 'DQFD' and MODEL_NAME != 'BC':
             model.memory[a_idx].reset_memory()
 
         for seq_idx in range(len(x)):
-            embeddings = torch.reshape(model.encoder(x[seq_idx].to(device)), [x[seq_idx].shape[0], Z_DIM])
+            progress = seq_idx / float(len(x))
+            print("Progress = %.4f %%" % (progress * 100.))
+
+            img = torch.from_numpy(np.array(x[seq_idx])).to(device)
+            embeddings = torch.reshape(model.encoder(img), [img.shape[0], Z_DIM])
 
             actions = np.reshape(a[seq_idx], [-1]).astype(int)
             for i in range(embeddings.shape[0] - 1):
                 model.memory[actions[i + 1]].save_memory(embeddings[i], embeddings[i + 1])
 
-    with torch.no_grad():
-        prime_DND(training_X, training_a)
-        print("Num dict keys (0) = ", len(model.memory[0].keys))
-        print("Num dict keys (1) = ", len(model.memory[1].keys))
-        print("Num dict keys (2) = ", len(model.memory[2].keys))
+    if LOAD_DND:
+        print("Loading DND...")
+
+        model.memory = pickle.load(open('./saved_models/dnd.pkl', 'rb'))
+    else:
+        print("Priming DND...")
+
+        with torch.no_grad():
+            prime_DND(training_X, training_a)
+            print("Num dict keys (0) = ", len(model.memory[0].keys))
+            print("Num dict keys (1) = ", len(model.memory[1].keys))
+            print("Num dict keys (2) = ", len(model.memory[2].keys))
+
+            print("Pickling the DND...")
+            with open('./saved_models/dnd.pkl', 'wb') as pkl_file:
+                pickle.dump(model.memory, pkl_file)
+
+    if MODEL_NAME == 'Conviction':
+        counter = collections.Counter(flat_a)
+        freq_0 = counter[0] / float(len(flat_a))
+        freq_1 = counter[1] / float(len(flat_a))
+        freq_2 = counter[2] / float(len(flat_a))
+
+        action_priors = [freq_0, freq_1, freq_2]
+        print("==> Using MCTS with baseline priors: ", action_priors)
+        MCTS_planner = MCTS(model, action_priors)
 
 prev_obs = None
 prev_a = 0
 def get_actions(obs):
     global prev_obs
     global prev_a
+
+    def deltasToActionSequence(deltas):
+        # transform into N steps forward, N steps (right or left): i.e. an L shape movement. 2 components.
+        forward_steps = int(round(deltas[0][0]))
+        sideways_steps = int(round(deltas[0][1])) # if negative, it means steps to the right, if positive, steps to the left.
+
+        print("forward_steps = ", forward_steps)
+        print("sideways_steps = ", sideways_steps)
+
+        # convert to sequence of actions
+        action_sequence = []
+
+        if forward_steps == 0 and sideways_steps == 0:
+            action_sequence.append(np.random.choice(np.arange(ACTION_SPACE)))
+            return action_sequence
+
+        if forward_steps < 0:
+            action_sequence.append(1.)
+            action_sequence.append(1.)
+            for _ in range(abs(forward_steps)):
+                action_sequence.append(2.)
+
+        else:
+            for _ in range(forward_steps):
+                action_sequence.append(2.)
+
+        if sideways_steps > 0:
+            action_sequence.append(0)
+            for _ in range(abs(sideways_steps)):
+                action_sequence.append(2.)
+        elif sideways_steps < 0:
+            action_sequence.append(1)
+            for _ in range(abs(sideways_steps)):
+                action_sequence.append(2.)
+
+        return action_sequence
 
     def actionPlanning(img, a):
         if model.memory[a] is None:
@@ -171,9 +251,15 @@ def get_actions(obs):
         return np.argmax(q_vals.cpu().data.numpy())
     elif MODEL_NAME == 'BC':
         state_batch = img
-        logits = model(state_batch)
-        print("action logits = ", logits.cpu().data.numpy())
-        return np.argmax(logits.cpu().data.numpy())
+        deltas = model(state_batch)
+
+        action_sequence = deltasToActionSequence(deltas.cpu().data.numpy())
+        return np.array(action_sequence)
+    elif MODEL_NAME == 'Conviction':
+        action_sequence = MCTS_planner.plan(img)
+        return np.array(action_sequence)
+
+    # TODO: the following code is for the ablation study planning. Re-organize.
 
     values, incertitudes = uncertaintyCalculation(img)
     incertitudes = np.reshape(incertitudes, [-1])
@@ -240,13 +326,26 @@ while log_done_counter < NUM_EPISODES:
         tmp_obs = obs
         actions = get_actions(obs)
 
-        env.render()
-        obs, rewards, done, _ = env.step(actions)
-        obs = env.render('rgb_array', tile_size=TILE_SIZE)
-        if out is not None:
-            out.write(obs)
+        if MODEL_NAME == 'BC' or MODEL_NAME == 'Conviction':  # special case: this returns a sequence of actions, not just 1 action
+            for current_a in actions:
+                env.render()
+                obs, rewards, done, _ = env.step(current_a)
+                obs = env.render('rgb_array', tile_size=TILE_SIZE)
+                if out is not None:
+                    out.write(obs)
 
-        frame_counter += 1
+                frame_counter += 1
+
+                if done:
+                    break
+        else:
+            env.render()
+            obs, rewards, done, _ = env.step(actions)
+            obs = env.render('rgb_array', tile_size=TILE_SIZE)
+            if out is not None:
+                out.write(obs)
+
+            frame_counter += 1
 
     else:
 

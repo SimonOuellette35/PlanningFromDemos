@@ -1,4 +1,4 @@
-from model.MotionPlannerV2 import MotionPlanner
+from model.AblationStudy import AblationModel
 import numpy as np
 import utils
 import torch
@@ -11,8 +11,8 @@ import matplotlib.pyplot as plt
 import pickle
 import model.dnd as dnd
 
-data_dir = './SupervisedPolicy_baseline/data/'
-model_dir = './saved_models/'
+data_dir = '../BC_baseline/data/'
+model_dir = '../saved_models/'
 DEVICE = 'cuda'
 ACTION_SPACE = 4
 

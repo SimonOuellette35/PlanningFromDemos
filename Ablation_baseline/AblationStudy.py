@@ -5,7 +5,7 @@ import torch
 from model.dnd import DND
 import torchvision.models as models
 
-class MotionPlanner(nn.Module):
+class AblationModel(nn.Module):
 
     def __init__(self, z_dim=512, action_space=5, stop_threshold=0., dict_len=1000, device='cuda'):
         super().__init__()
