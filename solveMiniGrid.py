@@ -31,7 +31,7 @@ elif GRID_DIFFICULTY == 'Intermediate':
 
 device = 'cuda'
 ACTION_SPACE = 3
-Z_DIM = 512
+Z_DIM = 2048
 NC = 3
 DET_SEED = 555
 
@@ -85,7 +85,8 @@ elif MODEL_NAME=='Ablation':
     model.load_state_dict(torch.load(model_path))
 elif MODEL_NAME=='Conviction':
     print("============= Using Conviction planner ===================")
-    model = ConvictionPlanner(action_space=ACTION_SPACE, device=device, dict_len=25000)
+    #model = ConvictionPlanner(action_space=ACTION_SPACE, device=device, dict_len=25000)
+    model = ConvictionPlanner(action_space=ACTION_SPACE, device=device, z_dim=Z_DIM, dict_len=5000)
 
     model.load_state_dict(torch.load(model_path))
 
@@ -162,7 +163,8 @@ if MODEL_NAME != 'DQFD' and MODEL_NAME != 'BC':
 
         action_priors = [freq_0, freq_1, freq_2]
         print("==> Using MCTS with baseline priors: ", action_priors)
-        MCTS_planner = MCTS(model, action_priors)
+        MCTS_planner = MCTS(model, z_dim=Z_DIM, action_priors=action_priors)
+        #MCTS_planner = MCTS(model)
 
 prev_obs = None
 prev_a = 0

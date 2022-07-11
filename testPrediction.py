@@ -1,10 +1,11 @@
 from gym_minigrid.wrappers import *
 import torch
 import utils
-from model.ConvictionPlanner import ConvictionPlanner
+from model.ConvictionPlannerV2 import ConvictionPlanner
 import numpy as np
 import matplotlib.pyplot as plt
 import pickle
+import torch.nn.functional as F
 
 device = 'cuda'
 ACTION_SPACE = 3
@@ -148,8 +149,11 @@ with torch.no_grad():
 
         img = torch.unsqueeze(torch.from_numpy(test_X[episode_idx][step_idx]).to(device), axis=0)
         img_embedding = torch.reshape(model.encoder(img), [img.shape[0], Z_DIM])
-        pred_value = model.valuePredictor(img_embedding)
+        pred_value, pred_done, pred_actions = model.predict(img_embedding)
+        pred_actions = F.softmax(pred_actions)
         print("==> Estimated current value: ", pred_value.cpu().data.numpy())
+        print("==> Estimated done: ", pred_done.cpu().data.numpy())
+        print("==> Estimated action probs: ", pred_actions.cpu().data.numpy())
 
         plt_img = np.reshape(test_X[episode_idx][step_idx], [W, H, NC])
         plt.imshow(plt_img)
