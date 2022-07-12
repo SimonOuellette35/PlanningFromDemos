@@ -54,6 +54,18 @@ class SymbolicPlanner(nn.Module):
                 module
             )
 
+        self.valueModel = torch.nn.Sequential(
+                torch.nn.Linear(x_dim, 1024),
+                torch.nn.ReLU(),
+                torch.nn.Linear(1024, 2048),
+                torch.nn.ReLU(),
+                torch.nn.Linear(2048, 1024),
+                torch.nn.ReLU(),
+                torch.nn.Linear(1024, 512),
+                torch.nn.ReLU(),
+                torch.nn.Linear(512, 1)
+        ).to(device).double()
+
     # TODO: normalize batch_X/batch_next?
     # batch_x : [BATCH_SIZE, 362], symbolic space frame representation at time t
     # batch_next: [BATCH_SIZE, 362], symbolic space frame representation at time t+1
@@ -88,6 +100,85 @@ class SymbolicPlanner(nn.Module):
     #     # calculate loss
     #     return F.mse_loss(pred_delta[:, 1:], actual_delta[:, 1:]) + F.mse_loss(pred_delta[:, 0], actual_delta[:, 0])
 
+    def attention(self, data, indices):
+        attended_cells = []
+        attended_indices = []
+
+        def bind(idx):
+            if idx < 1:
+                idx = 1
+
+            if idx > 361:
+                idx = 361
+
+            return idx
+
+        for batch_idx in range(data.shape[0]):
+            tmp_idx = indices[batch_idx]
+
+            tmp_idx_above = bind(tmp_idx - 1)
+            tmp_idx_below = bind(tmp_idx + 1)
+            tmp_idx_right = bind(tmp_idx + 19)
+            tmp_idx_left = bind(tmp_idx - 19)
+
+            cell_list = [0, tmp_idx, tmp_idx_left, tmp_idx_right, tmp_idx_above, tmp_idx_below]
+            #print("cell_list: ", cell_list)
+            attended_indices.append(cell_list)
+            attended_cells.append(torch.unsqueeze(data[batch_idx][cell_list], dim=0))
+
+        return torch.cat(attended_cells, dim=0).to(self.device), np.array(attended_indices)
+
+    def predict(self, batch_x, batch_a):
+        pointer_indices = []
+        for i in range(batch_x.shape[0]):
+            tmp_idx = np.argmax(batch_x[i])
+            #print("pointer index = ", tmp_idx)
+            pointer_indices.append(tmp_idx)
+
+        # 1) attention mechanism
+        batch_x = batch_x.astype(float)
+        batch_x = torch.from_numpy(batch_x).to(self.device)
+
+        attended_view, attended_indices = self.attention(batch_x, pointer_indices)
+
+        print(attended_view)
+        print(attended_indices)
+
+        # 2) run attended_view through transition model, conditional on action. Get predicted transition.
+        batch_preds = []
+        for i in range(batch_a.shape[0]):
+            #print("action ==> ", batch_a[i])
+            d_input = torch.unsqueeze(attended_view[i], dim=0)
+            #print("d_input shape = ", d_input.shape)
+            pred_transition = self.dynamics_models[batch_a[i]](d_input)
+
+            #print("pred_transition shape = ", pred_transition.shape)
+
+            # 3) re-map predicted transform into original space using inverse attention.
+            batch_preds.append(pred_transition)
+
+        batch_preds = torch.cat(batch_preds, dim=0)
+
+        # 4) inverse map to output prediction in original latent space, not the compressed one.
+        batch_preds = batch_preds.cpu().data.numpy()
+
+        def inverse_transform(data, indices):
+            output = np.zeros([362])
+            for idx in range(len(indices)):
+                target_idx = indices[idx]
+
+                output[target_idx] = data[idx]
+
+            return output
+
+        outputs = []
+        for i in range(batch_preds.shape[0]):
+            total_delta = inverse_transform(batch_preds[i], attended_indices[i])
+            pred_next = batch_x[i].cpu().data.numpy() + total_delta
+            outputs.append(pred_next)
+
+        return np.array(outputs)
+
     # TODO: try hard-coded attention mechanism (problem-specific, but tests the idea)
     # TODO: the problem with the kind of attention mechanism I'm looking for is that it's position-invariant
     #  (perhaps even, ideally, rotation-invariant). However, how do you "stitch back" the delta onto the original
@@ -98,35 +189,7 @@ class SymbolicPlanner(nn.Module):
     #  conditionally calculated homography matrix applied to original matrix produced the attended view (includes
     #  operations like rotation, masking, repositioning). The inverse operation must be available for retranslation
     #  into original coordinates.
-    def trainBatch(self, batch_x, batch_next, batch_a, eval=False):
-
-        def attention(data, indices):
-            attended_cells = []
-            attended_indices = []
-
-            for batch_idx in range(data.shape[0]):
-                tmp_idx = indices[batch_idx]
-
-                tmp_idx_above = tmp_idx - 1
-                tmp_idx_below = tmp_idx + 1
-                tmp_idx_right = tmp_idx + 19
-                tmp_idx_left = tmp_idx - 19
-
-                cell_list = [0, tmp_idx, tmp_idx_left, tmp_idx_right, tmp_idx_above, tmp_idx_below]
-                attended_indices.append(cell_list)
-                attended_cells.append(torch.unsqueeze(data[batch_idx][cell_list], dim=0))
-
-            return torch.cat(attended_cells, dim=0).to(self.device), np.array(attended_indices)
-
-        # def inverse_transform(data, indices):
-        #     output = np.zeros([1, 362])
-        #
-        #     for idx in range(len(indices)):
-        #         target_idx = indices[idx]
-        #
-        #         output[0, target_idx] = data[idx]
-        #
-        #     return torch.from_numpy(output)
+    def trainBatch(self, batch_x, batch_next, batch_a, batch_v, eval=False):
 
         pointer_indices = []
         for i in range(batch_x.shape[0]):
@@ -137,10 +200,8 @@ class SymbolicPlanner(nn.Module):
         batch_x = torch.from_numpy(batch_x)
         batch_next = torch.from_numpy(batch_next)
 
-        attended_view, attended_indices = attention(batch_x, pointer_indices)
-        attended_next, attended_next_indices = attention(batch_next, pointer_indices)
-
-        #print("attended_view.shape - ", attended_view.shape)
+        attended_view, attended_indices = self.attention(batch_x, pointer_indices)
+        attended_next, attended_next_indices = self.attention(batch_next, pointer_indices)
 
         # 2) run attended_view through transition model, conditional on action. Get predicted transition.
         batch_preds = []
@@ -148,7 +209,6 @@ class SymbolicPlanner(nn.Module):
             pred_transition = self.dynamics_models[batch_a[i]](torch.unsqueeze(attended_view[i], dim=0))
 
             # 3) re-map predicted transform into original space using inverse attention.
-            #batch_preds.append(inverse_transform(pred_transition, attended_indices[i]))
             batch_preds.append(pred_transition)
 
         batch_preds = torch.cat(batch_preds, dim=0)
@@ -156,7 +216,12 @@ class SymbolicPlanner(nn.Module):
 
         #print("batch_preds shape = %s, actual_deltas shape = %s" % (batch_preds.shape, actual_deltas.shape))
 
-        # TODO: no gradient problem here. Why?
-        return F.mse_loss(batch_preds, actual_deltas)
+        dynamics_loss = F.mse_loss(batch_preds, actual_deltas)
+
+        value_preds = self.valueModel(batch_x.to(self.device))
+
+        actual_values = torch.from_numpy(batch_v).to(self.device)
+        value_loss = F.mse_loss(value_preds, actual_values)
+        return dynamics_loss + value_loss, dynamics_loss, value_loss
 
 

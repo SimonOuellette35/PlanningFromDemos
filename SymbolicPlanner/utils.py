@@ -3,6 +3,41 @@ import csv
 import numpy as np
 import cv2
 
+def display(x):
+    direction = x[0]
+    print("direction: ", direction)
+    for i in range(19):
+        str_row = ""
+        for j in range(19):
+            actual_idx = 1 + (j * 19 + i)
+
+            if round(x[actual_idx]) == 1.0:
+                # empty cell
+                str_row += "|   |"
+            elif round(x[actual_idx]) == 2.0:
+                # wall
+                str_row += "|||||"
+            elif round(x[actual_idx]) == 10.0:
+                # cursor
+                if round(direction) == 0:
+                    str_row += "| > |"
+                elif round(direction) == 1:
+                    str_row += "| V |"
+                elif round(direction) == 2:
+                    str_row += "| < |"
+                elif round(direction) == 3:
+                    str_row += "| A |"
+                else:
+                    str_row += "| ? |"
+            elif round(x[actual_idx]) == 8.0:
+                # goal
+                str_row += "| # |"
+            else:
+                str_row += "|%.2f|" % x[actual_idx]
+
+        print(str_row)
+        print("------------------------------------------------------------------------------------------")
+
 def mapMinigridAction(a_str):
     if a_str == '':
         return 0

@@ -11,7 +11,7 @@ Z_DIM = 512
 NC = 3
 LOAD_DND = True
 
-model_path = './saved_models/best_full_modelV3'
+model_path = 'saved_models/best_full_modelV3_backup'
 data_dir = './data/'
 
 GRID_DIFFICULTY = 'Intermediate'

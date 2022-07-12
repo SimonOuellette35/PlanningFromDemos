@@ -1,5 +1,5 @@
-from DeltaSymbolicPlanner import SymbolicPlanner
-#from BaseDNDSymbolicPlanner import SymbolicPlanner
+#from DeltaSymbolicPlanner import SymbolicPlanner
+from DNDDeltaSymbolicPlanner import SymbolicPlanner
 #from BaseSymbolicPlanner import SymbolicPlanner
 import numpy as np
 import utils
@@ -12,7 +12,7 @@ data_dir = 'data/'
 model_dir = './saved_models/'
 DEVICE = 'cuda'
 ACTION_SPACE = 3
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 
 X, a, v = utils.loadMinigridSymbolicDemos(data_dir)
 
@@ -38,21 +38,21 @@ print("step_counter = ", step_counter)
 
 Z_DIM = 100
 LR = 0.0001
-model = SymbolicPlanner(z_dim=Z_DIM, action_space=ACTION_SPACE, device=DEVICE, dict_len=500)
+model = SymbolicPlanner(action_space=ACTION_SPACE, device=DEVICE, dict_len=500)
 
 model.train()
 model.to(DEVICE)
-#optimizer = optim.AdamW(model.parameters(), weight_decay=0.01, lr=LR)
-optimizer = optim.Adam(model.parameters(), lr=LR)
+optimizer = optim.AdamW(model.parameters(), weight_decay=0.01, lr=LR)
+#optimizer = optim.Adam(model.parameters(), lr=LR)
 
 best_loss = np.inf
 
-NUM_EPOCHS = 10000
+NUM_EPOCHS = 20000
 
 best_loss = np.inf
 # TODO: same problem here: must predict done = True? Predict success frame with special representation?
 def generateBatch(tmp_X, tmp_a, tmp_v):
-  batch_X, batch_nextX, batch_actions = list(), list(), list()
+  batch_X, batch_nextX, batch_actions, batch_values = list(), list(), list(), list()
 
   for _ in range(BATCH_SIZE):
     episode_ok = False
@@ -66,8 +66,9 @@ def generateBatch(tmp_X, tmp_a, tmp_v):
     batch_X.append(tmp_X[episode_idx][step_idx])
     batch_nextX.append(tmp_X[episode_idx][step_idx+1])
     batch_actions.append(tmp_a[episode_idx][step_idx+1][0])
+    batch_values.append(tmp_v[episode_idx][step_idx].astype(float))
 
-  return np.array(batch_X), np.array(batch_nextX), np.array(batch_actions)
+  return np.array(batch_X), np.array(batch_nextX), np.array(batch_actions), np.array(batch_values)
 
 torch.autograd.set_detect_anomaly(True)
 train_losses = []
@@ -76,9 +77,9 @@ for epoch in range(NUM_EPOCHS):
 
   optimizer.zero_grad()
 
-  batch_X, batch_nextX, batch_actions = generateBatch(training_X, training_a, training_v)
+  batch_X, batch_nextX, batch_actions, batch_values = generateBatch(training_X, training_a, training_v)
 
-  loss = model.trainBatch(batch_X, batch_nextX, batch_actions)
+  loss, d_loss, v_loss = model.trainBatch(batch_X, batch_nextX, batch_actions, batch_values)
 
   optimizer.zero_grad()
   loss.backward()
@@ -88,12 +89,16 @@ for epoch in range(NUM_EPOCHS):
 
   # calculate test set performance to check for overfitting...
   with torch.no_grad():
-    batch_X, batch_nextX, batch_actions = generateBatch(test_X, test_a, test_v)
+    batch_X, batch_nextX, batch_actions, batch_values = generateBatch(test_X, test_a, test_v)
 
-    test_loss = model.trainBatch(batch_X, batch_nextX, batch_actions, eval=True)
+    test_loss, _, _ = model.trainBatch(batch_X, batch_nextX, batch_actions, batch_values, eval=True)
 
   test_losses.append(test_loss.cpu().data.numpy())
-  print("Epoch# %s: loss = %s (test_loss = %s)" % (epoch + 1, loss.cpu().data.numpy(), test_loss.cpu().data.numpy()))
+  print("Epoch# %s: loss = %.2f (test_loss = %.2f, dynamics_loss = %.4f, value_loss = %.2f)" % (epoch + 1,
+                                                                                                loss.cpu().data.numpy(),
+                                                                                                test_loss.cpu().data.numpy(),
+                                                                                                d_loss.cpu().data.numpy(),
+                                                                                                v_loss.cpu().data.numpy()))
 
   # save best model to file
   if test_loss.cpu().data.numpy() < best_loss:
@@ -101,10 +106,11 @@ for epoch in range(NUM_EPOCHS):
     print("--> Saving Best Model...")
     torch.save(model.state_dict(), '%sbest_full_modelV3' % model_dir)
 
-    # print("Pickling the DND...")
-    # with open('./saved_models/dnd.pkl', 'wb') as pkl_file:
-    #   pickle.dump(model.memory, pkl_file)
+    print("Pickling the DND...")
+    with open('saved_models/dnd.pkl', 'wb') as pkl_file:
+      pickle.dump(model.memory, pkl_file)
 
+print("==> Best test_loss: ", best_loss)
 plt.plot(train_losses, color='blue')
 plt.plot(test_losses, color='red')
 plt.show()

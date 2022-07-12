@@ -1,11 +1,9 @@
 from gym_minigrid.wrappers import *
 import torch
 import utils
-from DeltaSymbolicPlanner import SymbolicPlanner
+from DNDDeltaSymbolicPlanner import SymbolicPlanner
 import numpy as np
 import pickle
-
-
 
 device = 'cuda'
 ACTION_SPACE = 3
@@ -13,7 +11,7 @@ Z_DIM = 512
 NC = 3
 LOAD_DND = True
 
-model_path = './saved_models/best_full_modelV3'
+model_path = 'saved_models/best_full_modelV3_backup'
 data_dir = './data/'
 
 GRID_DIFFICULTY = 'Intermediate'
@@ -36,6 +34,10 @@ model.load_state_dict(torch.load(model_path))
 
 model.to(device)
 model.eval()
+
+print("Loading DND...")
+
+model.memory = pickle.load(open('saved_models/dnd_backup.pkl', 'rb'))
 
 # Prime DND
 X, a, v = utils.loadMinigridSymbolicDemos(data_dir)
@@ -114,68 +116,34 @@ np.set_printoptions(suppress=True)
 
 with torch.no_grad():
     # select a random time step in a random episode. Display its current estimated value, as well as the image.
-
-    # while input_str != 'q':
     episode_idx = np.random.choice(np.arange(len(test_X)))
     step_idx = np.random.choice(np.arange(len(test_X[episode_idx]) - 1))
+    x_input = np.reshape(test_X[episode_idx][step_idx], [1, -1])
 
-    x_input = test_X[episode_idx][step_idx]
-    display(x_input)
-    #display_raw(x_input)
+    initial_value = model.valueModel(torch.from_numpy(x_input).to(device))
+    print("Initial estimated value: %.2f" % initial_value.cpu().data.numpy()[0])
 
-    # input a sequence of 5 actions from the user
-    print("Actual action is: ", test_a[episode_idx][step_idx+1])
-    input_str = input("Enter action: ")
+    while input_str != 'q':
+        print("Episode_idx = %i, step_idx = %i" % (episode_idx, step_idx))
+        display(x_input[0])
 
-    action = int(input_str)
+        # input a sequence of 5 actions from the user
+        print("Actual action is [%i][%i] : %i" % (episode_idx, step_idx+1, test_a[episode_idx][step_idx+1]))
+        input_str = input("Enter action sequence: ")
 
-    # call the transition model 5 times to predict the impact of the action sequence, then call the predictor module
-    #  to estimate the predicted action sequence value. Display.
+        action_sequence = list(map(int, input_str.split(',')))
+        print("Captured action sequence: ", action_sequence)
 
-    def attention(data, indices):
-        attended_cells = []
-        attended_indices = []
+        pred_next = x_input
+        iter_idx = 1
+        for current_a in action_sequence:
+            pred_next, uncertainties = model.predict(pred_next, np.array([current_a]))
+            print("\nStep %i: action %i (uncertainty: %.4f)" % (step_idx, current_a, uncertainties[0]))
+            display(pred_next[0])
+            iter_idx += 1
 
-        for batch_idx in range(data.shape[0]):
-            tmp_idx = indices[batch_idx]
+        value = model.valueModel(torch.from_numpy(pred_next).to(device))
+        print("Final estimated value: %.2f" % value.cpu().data.numpy()[0])
 
-            tmp_idx_above = tmp_idx - 1
-            tmp_idx_below = tmp_idx + 1
-            tmp_idx_right = tmp_idx + 19
-            tmp_idx_left = tmp_idx - 19
-
-            cell_list = [0, tmp_idx, tmp_idx_left, tmp_idx_right, tmp_idx_above, tmp_idx_below]
-            attended_indices.append(cell_list)
-            attended_cells.append(torch.unsqueeze(data[batch_idx][cell_list], dim=0))
-
-        return torch.cat(attended_cells, dim=0).to(device), np.array(attended_indices)
-
-    def inverse_transform(data, indices):
-        output = np.zeros([1, 362])
-        for idx in range(len(indices)):
-            target_idx = indices[idx]
-
-            output[0, target_idx] = data[idx]
-
-        return output
-
-    pointer_idx = np.where(x_input == 10.)[0][0]
-
-    # 1) attention mechanism
-    batch_x = torch.from_numpy(np.array([x_input]))
-
-    attended_view, attended_indices = attention(batch_x, [pointer_idx])
-
-    print("attended_view: ", attended_view[0].cpu().data.numpy())
-
-    pred_delta = model.dynamics_models[action](attended_view)
-
-    print("pred_delta: ", pred_delta.cpu().data.numpy()[0])
-
-    total_delta = inverse_transform(pred_delta.cpu().data.numpy()[0], attended_indices[0])
-    pred_next = x_input + total_delta
-
-    display(pred_next[0])
-
-    print("================================================================================")
+        print("================================================================================")
 
