@@ -25,7 +25,7 @@ class MCTS:
     # TODO:
     #  1) optimize this by calling valuePredictor only once for all self.N states?
     #  2) parallelize this?
-    def plan(self, data_row, steps=5):
+    def plan(self, data_row, steps=10):
 
         action_seqs = []
         convictions = []
