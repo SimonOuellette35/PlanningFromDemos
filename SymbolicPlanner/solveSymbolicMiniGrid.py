@@ -68,7 +68,7 @@ model.eval()
 
 print("Loading DND...")
 
-model.memory = pickle.load(open('saved_models/dnd_backup.pkl', 'rb'))
+model.memory = pickle.load(open('saved_models/dnd.pkl', 'rb'))
 
 MCTS_planner = MCTS(model)
 

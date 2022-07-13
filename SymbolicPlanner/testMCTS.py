@@ -2,6 +2,7 @@ from gym_minigrid.wrappers import *
 import torch
 import utils
 from DNDDeltaSymbolicPlanner import SymbolicPlanner
+from SymbolicMCTSWithUncertainty import MCTS
 import numpy as np
 import pickle
 
@@ -114,34 +115,20 @@ def display(x):
 input_str = ''
 np.set_printoptions(suppress=True)
 
+
+MCTS_planner = MCTS(model)
+
 with torch.no_grad():
     # select a random time step in a random episode. Display its current estimated value, as well as the image.
-    while input_str != 'q':
-        episode_idx = np.random.choice(np.arange(len(test_X)))
-        step_idx = np.random.choice(np.arange(len(test_X[episode_idx]) - 1))
-        x_input = np.reshape(test_X[episode_idx][step_idx], [1, -1])
+    episode_idx = np.random.choice(np.arange(len(test_X)))
+    step_idx = np.random.choice(np.arange(len(test_X[episode_idx]) - 1))
+    x_input = np.reshape(test_X[episode_idx][step_idx], [1, -1])
 
-        initial_value = model.valueModel(torch.from_numpy(x_input).to(device))
-        print("Initial estimated value: %.2f" % initial_value.cpu().data.numpy()[0])
-        display(x_input[0])
+    initial_value = model.valueModel(torch.from_numpy(x_input).to(device))
+    print("Initial estimated value: %.2f" % initial_value.cpu().data.numpy()[0])
+    display(x_input[0])
 
-        # input a sequence of 5 actions from the user
-        print("Actual action is [%i][%i] : %i" % (episode_idx, step_idx+1, test_a[episode_idx][step_idx+1]))
-        input_str = input("Enter action sequence: ")
+    action_sequence = MCTS_planner.plan(x_input)
 
-        action_sequence = list(map(int, input_str.split(',')))
-        print("Captured action sequence: ", action_sequence)
-
-        pred_next = x_input
-        iter_idx = 1
-        for current_a in action_sequence:
-            pred_next, uncertainties, pred_done = model.predict(pred_next, np.array([current_a]))
-            print("\nStep %i: action %i (uncertainty: %.4f, done: %.2f)" % (step_idx, current_a, uncertainties[0], pred_done[0]))
-            display(pred_next[0])
-            iter_idx += 1
-
-        value = model.valueModel(torch.from_numpy(pred_next).to(device))
-        print("Final estimated value: %.2f" % value.cpu().data.numpy()[0])
-
-        print("================================================================================")
+    print("best action sequence: ", action_sequence)
 

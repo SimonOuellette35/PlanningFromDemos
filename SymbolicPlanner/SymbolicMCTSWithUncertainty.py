@@ -36,19 +36,32 @@ class MCTS:
             action_seq = []
 
             uncertainty = 0.
-
+            done_uncertainty = 0.
             next_state = data_row
+            is_done = 0.
             for step in range(steps):
                 a = self._pick_action()
-                action_seq.append(a)
 
-                next_state, uncertainties = self.model.predict(next_state, np.array([a]))
-                uncertainty += uncertainties[0]
+                next_state, uncertainties, done_preds = self.model.predict(next_state, np.array([a]))
 
+                if done_preds[0] > 0.5:
+                    done_uncertainty = uncertainties[0]
+                    is_done = 10.
+                    action_seq.append(2)
+                    break
+                else:
+                    uncertainty += uncertainties[0]
+                    action_seq.append(a)
+
+            #print("==> Tested action sequence: ", action_seq)
+
+            # TODO: how to best combine done prediction with uncertainty?
             final_state = torch.from_numpy(next_state).to(self.device)
             value = self.model.valueModel(final_state)
 
-            conviction = value.cpu().data.numpy() * np.exp(uncertainty)
+            conviction = (value.cpu().data.numpy()) * np.exp(uncertainty) + (is_done / np.exp(done_uncertainty))
+
+            #print("\tis_done: %i, estimated value: %.2f, uncertainty: %.2f, conviction: %.2f" % (is_done, value, uncertainty, conviction))
 
             convictions.append(conviction)
             action_seqs.append(np.array(action_seq))
